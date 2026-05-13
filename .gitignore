@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build / cache artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage output
+coverage/
+.nyc_output/
+
+# Environment / editor
+.env
+.env.local
+.DS_Store
+*.log
+
+# Nix
+.direnv/
+result
+result-*

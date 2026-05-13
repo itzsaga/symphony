@@ -1,0 +1,135 @@
+- name: Bootstrap project skeleton
+  description: Stand up the Nix flake, Bun + TypeScript + Effect baseline, and the foundational Logger service. Everything else depends on these. Subtasks are independent of each other and can run in parallel.
+  subtasks:
+    - name: Nix flake dev shell
+      description: Author flake.nix that provides bun, nono, claude, and any other host tools. Pin via flake.lock. The dev shell is the only supported way to develop and run symphony.
+      status: completed
+      spec: specs/flake-nix.md
+    - name: Bun + TypeScript + Effect setup
+      description: Initialize package.json, tsconfig.json, src/ directory structure, and main.ts stub. Install Effect (effect, @effect/platform, @effect/platform-bun, @effect/schema), liquidjs, @effect/vitest (dev). Wire bun scripts.
+      status: completed
+      spec: specs/bun-typescript-effect-setup.md
+    - name: Logger service
+      description: 'Implement Logger as an Effect service: JSONL records written to stderr, plus an in-memory ring buffer (last N events) the HTTP dashboard reads. Honor §13.1''s required fields (issue_id, issue_identifier, session_id) when present in context.'
+      status: completed
+      spec: specs/logger-service.md
+    - name: Project AGENTS.md and CLAUDE.md
+      description: Author repo-root AGENTS.md with the project's instructions for any coding agent (build/test commands, layout, conventions, the two declared spec divergences). Author CLAUDE.md as a one-line `@AGENTS.md` import per https://code.claude.com/docs/en/memory#agents-md plus any Claude-specific extras.
+      status: completed
+      spec: specs/agents-md.md
+- name: Workflow loading & configuration
+  description: Parse WORKFLOW.md, expose typed config, watch for changes, and enforce path safety. This is the layer the orchestrator reads from on every tick (§6.2 dynamic reload).
+  subtasks:
+    - name: WORKFLOW.md schema and parser
+      description: '@effect/schema for the front matter (tracker, polling, workspace, hooks, agent_runner) with defaults from spec §6.4. Implement YAML front-matter + prompt-body split (§5.2), $VAR resolution, ~ expansion, path normalization (§6.1). Error types per §5.5.'
+      status: defined
+      spec: specs/workflow-schema-and-parser.md
+    - name: WorkflowLoader service with file watch
+      description: 'Effect service that loads WORKFLOW.md, exposes a SubscriptionRef of current TypedConfig + prompt template, and watches the file for changes (§6.2). On change: re-parse, validate, broadcast. Invalid reloads keep last-known-good (§6.2). Defensive re-validation on dispatch (§6.3).'
+      status: defined
+      spec: specs/workflow-loader-and-watch.md
+    - name: Path safety invariants
+      description: 'Pure-function module enforcing §9.5: workspace path stays under workspace root, workspace key is sanitized to [A-Za-z0-9._-], absolute-path normalization. Called by WorkspaceManager and by ClaudeRunner before every launch.'
+      status: defined
+      spec: specs/path-safety.md
+- name: Linear tracker client
+  description: 'GraphQL client for Linear implementing the three required operations (§11.1): fetch_candidate_issues, fetch_issues_by_states, fetch_issue_states_by_ids. Includes pagination, normalization to the spec §4.1.1 Issue model, and the §11.4 error map.'
+  status: defined
+  spec: specs/linear-client.md
+  subtasks: []
+- name: Nono sandbox service
+  description: Effect service that builds and runs `nono run` invocations for arbitrary commands (claude, hook scripts). Encapsulates the base profile, filesystem grants, network profile, and credential injection. Captures stderr separately. Reports sandbox-denial failures as a typed error.
+  status: defined
+  spec: specs/nono-sandbox-service.md
+  subtasks: []
+- name: Workspace manager and lifecycle hooks
+  description: Per-issue workspace creation, reuse, and the four lifecycle hooks. Path safety is enforced before launch.
+  subtasks:
+    - name: Workspace creation and reuse
+      description: 'WorkspaceManager service: deterministic per-issue path under workspace.root, sanitized key, idempotent creation with created_now signal (§9.2), invariant checks (§9.5), terminal-state cleanup (§8.6 + §16.3).'
+      status: defined
+      spec: specs/workspace-manager.md
+    - name: Lifecycle hooks execution
+      description: Run after_create, before_run, after_run, before_remove hooks (§9.4). Each hook wrapped by nono, runs in workspace cwd, honors hooks.timeout_ms (default 60s), failure semantics per §9.4.
+      status: defined
+      spec: specs/workspace-hooks.md
+- name: Prompt renderer
+  description: 'Strict Liquid wrapper using liquidjs with strictVariables and strictFilters. Inputs: prompt template, normalized issue, optional attempt integer (§5.4, §12). Errors map to template_parse_error / template_render_error.'
+  status: defined
+  spec: specs/prompt-renderer.md
+  subtasks: []
+- name: Claude Code stream-json runner
+  description: 'The core agent-runner integration. Each subtask is a layer in the stack: schemas at the bottom, subprocess management on top, control protocol on the side, event mapping at the boundary with the orchestrator.'
+  subtasks:
+    - name: Stream-json frame schemas
+      description: '@effect/schema for every frame type Claude emits (user/assistant/system/result/stream_event/rate_limit_event/control_request/control_response/control_cancel_request/transcript_mirror). Source of truth: research/claude-stream-json.md §2. Forward-compatible: unknown types pass through as opaque.'
+      status: defined
+      spec: specs/claude-stream-json-schemas.md
+    - name: Claude subprocess lifecycle
+      description: Spawn claude via Nono with the streaming-mode flag set, pipe stdin/stdout JSONL, capture stderr separately, handle graceful shutdown (stdin EOF → 5s → SIGTERM → 5s → SIGKILL), surface CLI-not-found / cwd-invalid / non-zero-exit as typed errors.
+      status: defined
+      spec: specs/claude-subprocess-lifecycle.md
+    - name: Control-protocol RPC
+      description: 'Bidirectional control_request/control_response handler over the same stdin/stdout pipe as conversation messages. Implements: can_use_tool (always denies with interrupt:true), mcp_message (routes to in-process MCP server), control_cancel_request (cancels the in-flight turn fiber). Per research/claude-stream-json.md §6.'
+      status: defined
+      spec: specs/claude-control-protocol.md
+    - name: Event mapping and token accounting
+      description: Map Claude stream events to spec §10.4 emitted events (session_started, turn_completed, turn_failed, …). Extract per-turn and per-session token usage from result.usage / result.modelUsage; track deltas vs last_reported_* per §13.5. Synthesize session_id = '<thread_id>-<turn_id>' as '<claude_session_uuid>-<num_turns>'.
+      status: defined
+      spec: specs/claude-event-mapping.md
+- name: In-process MCP server and linear_graphql tool
+  description: Host an SDK-type MCP server inside the orchestrator that exposes the linear_graphql tool (§10.5). Implements MCP JSON-RPC methods (initialize, tools/list, tools/call, notifications/initialized) routed through Claude's control-protocol mcp_message channel. The tool executes GraphQL via LinearClient and returns the response per §10.5's tool-result semantics.
+  status: defined
+  spec: specs/mcp-server-and-linear-graphql.md
+  subtasks: []
+- name: Orchestrator
+  description: The single-authority coordination layer. Each subtask is one slice of §§7–8, written so they compose into one Orchestrator service.
+  subtasks:
+    - name: Orchestrator state and reducer
+      description: Define OrchestratorRuntimeState (§4.1.8) and a pure reducer for every transition trigger (§7.3). State held in a SubscriptionRef so HTTP observers can subscribe. Reducer is total; every event has a transition.
+      status: defined
+      spec: specs/orchestrator-state.md
+    - name: Dispatch (candidate selection, sorting, slots)
+      description: Implement §8.2 eligibility, §8.3 concurrency (global + per-state), and dispatch sort order. Pure functions given (issues, state, config) → (dispatch_decisions, new_state).
+      status: defined
+      spec: specs/orchestrator-dispatch.md
+    - name: Reconciliation (stall + tracker state refresh)
+      description: Implement §8.5 part A (stall detection using last_codex_timestamp / started_at vs stall_timeout_ms) and part B (tracker state refresh, terminate-on-terminal-with-cleanup, terminate-on-non-active-without-cleanup, update-on-active).
+      status: defined
+      spec: specs/orchestrator-reconcile.md
+    - name: Retry + tick fiber
+      description: 'Fiber-based retry timers (§8.4: continuation = 1s fixed, failure = 10000 * 2^(attempt-1) capped). Retry timer fibers stored in retry_attempts; cancel = Fiber.interrupt. Tick fiber drives the poll loop at config.polling.interval_ms (§8.1).'
+      status: defined
+      spec: specs/orchestrator-retry-and-tick.md
+- name: HTTP server extension
+  description: OPTIONAL §13.7 extension, but in scope for v1. Read-only API + dashboard.
+  subtasks:
+    - name: HTTP server setup and port handling
+      description: '@effect/platform HTTP server. CLI --port overrides server.port. Loopback bind default (§13.7). Graceful start/stop tied to the application Layer. Restart-required behavior for port changes is acceptable.'
+      status: defined
+      spec: specs/http-server-setup.md
+    - name: JSON API and dashboard
+      description: 'Endpoints: GET / (server-rendered HTML dashboard), GET /api/v1/state, GET /api/v1/<identifier>, POST /api/v1/refresh. Response shapes per §13.7.1 / §13.7.2. 404 on unknown identifier; 405 on unsupported methods; JSON error envelope. POST /refresh enqueues an ImmediateTick (coalesce if already pending).'
+      status: defined
+      spec: specs/http-api-and-dashboard.md
+- name: Application wiring and startup
+  description: Assemble all Layers, parse the CLI (workflow path argument per §17.7), do startup terminal workspace cleanup (§8.6), handle SIGINT/SIGTERM for coordinated shutdown, exit codes per §17.7.
+  status: defined
+  spec: specs/application-wiring.md
+  subtasks: []
+- name: TRUST.md
+  description: 'Root-level trust-model document per spec §15.1 and §10.5. Covers: sandbox-first model with nono''s base profile spelled out; the two declared spec divergences (Claude in place of Codex; agent_runner.* in place of codex.*); high-trust agent posture + user-input-required handling; linear_graphql scoping; the §15.4 assumption that workflow hook scripts are fully trusted.'
+  status: defined
+  spec: specs/trust-md.md
+  subtasks: []
+- name: Test matrix verification and real-integration profile
+  description: Bring the implementation to §17 conformance. Subtasks run after all other top-level tasks. Per-component unit tests are expected to be written alongside their components; this top-level task is the audit pass and the gated integration profile.
+  subtasks:
+    - name: Section 17.1-17.7 coverage audit
+      description: 'Cross-check every bullet in §17.1 through §17.7 against the test suite. For each bullet without coverage, add a test. Output: a checklist mapping each §17.x bullet to the test file/case that covers it (lives in test/section-17-coverage.md).'
+      status: defined
+      spec: specs/section-17-audit.md
+    - name: Section 17.8 real Linear integration profile
+      description: 'Implement the §17.8 gated profile: tests run only when LINEAR_API_KEY is set, use isolated test identifiers, clean up tracker artifacts. Skipped tests must report ''skipped'' (not silently pass). When the profile is explicitly enabled (env flag), failures fail the run.'
+      status: defined
+      spec: specs/linear-integration-profile.md
