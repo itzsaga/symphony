@@ -22,24 +22,24 @@
   subtasks:
     - name: WORKFLOW.md schema and parser
       description: '@effect/schema for the front matter (tracker, polling, workspace, hooks, agent_runner) with defaults from spec §6.4. Implement YAML front-matter + prompt-body split (§5.2), $VAR resolution, ~ expansion, path normalization (§6.1). Error types per §5.5.'
-      status: defined
+      status: completed
       spec: specs/workflow-schema-and-parser.md
     - name: WorkflowLoader service with file watch
       description: 'Effect service that loads WORKFLOW.md, exposes a SubscriptionRef of current TypedConfig + prompt template, and watches the file for changes (§6.2). On change: re-parse, validate, broadcast. Invalid reloads keep last-known-good (§6.2). Defensive re-validation on dispatch (§6.3).'
-      status: defined
+      status: completed
       spec: specs/workflow-loader-and-watch.md
     - name: Path safety invariants
       description: 'Pure-function module enforcing §9.5: workspace path stays under workspace root, workspace key is sanitized to [A-Za-z0-9._-], absolute-path normalization. Called by WorkspaceManager and by ClaudeRunner before every launch.'
-      status: defined
+      status: completed
       spec: specs/path-safety.md
 - name: Linear tracker client
   description: 'GraphQL client for Linear implementing the three required operations (§11.1): fetch_candidate_issues, fetch_issues_by_states, fetch_issue_states_by_ids. Includes pagination, normalization to the spec §4.1.1 Issue model, and the §11.4 error map.'
-  status: defined
+  status: completed
   spec: specs/linear-client.md
   subtasks: []
 - name: Nono sandbox service
   description: Effect service that builds and runs `nono run` invocations for arbitrary commands (claude, hook scripts). Encapsulates the base profile, filesystem grants, network profile, and credential injection. Captures stderr separately. Reports sandbox-denial failures as a typed error.
-  status: defined
+  status: completed
   spec: specs/nono-sandbox-service.md
   subtasks: []
 - name: Workspace manager and lifecycle hooks
@@ -47,15 +47,15 @@
   subtasks:
     - name: Workspace creation and reuse
       description: 'WorkspaceManager service: deterministic per-issue path under workspace.root, sanitized key, idempotent creation with created_now signal (§9.2), invariant checks (§9.5), terminal-state cleanup (§8.6 + §16.3).'
-      status: defined
+      status: completed
       spec: specs/workspace-manager.md
     - name: Lifecycle hooks execution
       description: Run after_create, before_run, after_run, before_remove hooks (§9.4). Each hook wrapped by nono, runs in workspace cwd, honors hooks.timeout_ms (default 60s), failure semantics per §9.4.
-      status: defined
+      status: completed
       spec: specs/workspace-hooks.md
 - name: Prompt renderer
   description: 'Strict Liquid wrapper using liquidjs with strictVariables and strictFilters. Inputs: prompt template, normalized issue, optional attempt integer (§5.4, §12). Errors map to template_parse_error / template_render_error.'
-  status: defined
+  status: completed
   spec: specs/prompt-renderer.md
   subtasks: []
 - name: Claude Code stream-json runner
@@ -63,19 +63,19 @@
   subtasks:
     - name: Stream-json frame schemas
       description: '@effect/schema for every frame type Claude emits (user/assistant/system/result/stream_event/rate_limit_event/control_request/control_response/control_cancel_request/transcript_mirror). Source of truth: research/claude-stream-json.md §2. Forward-compatible: unknown types pass through as opaque.'
-      status: defined
+      status: completed
       spec: specs/claude-stream-json-schemas.md
     - name: Claude subprocess lifecycle
       description: Spawn claude via Nono with the streaming-mode flag set, pipe stdin/stdout JSONL, capture stderr separately, handle graceful shutdown (stdin EOF → 5s → SIGTERM → 5s → SIGKILL), surface CLI-not-found / cwd-invalid / non-zero-exit as typed errors.
-      status: defined
+      status: completed
       spec: specs/claude-subprocess-lifecycle.md
     - name: Control-protocol RPC
       description: 'Bidirectional control_request/control_response handler over the same stdin/stdout pipe as conversation messages. Implements: can_use_tool (always denies with interrupt:true), mcp_message (routes to in-process MCP server), control_cancel_request (cancels the in-flight turn fiber). Per research/claude-stream-json.md §6.'
-      status: defined
+      status: completed
       spec: specs/claude-control-protocol.md
     - name: Event mapping and token accounting
       description: Map Claude stream events to spec §10.4 emitted events (session_started, turn_completed, turn_failed, …). Extract per-turn and per-session token usage from result.usage / result.modelUsage; track deltas vs last_reported_* per §13.5. Synthesize session_id = '<thread_id>-<turn_id>' as '<claude_session_uuid>-<num_turns>'.
-      status: defined
+      status: completed
       spec: specs/claude-event-mapping.md
 - name: In-process MCP server and linear_graphql tool
   description: Host an SDK-type MCP server inside the orchestrator that exposes the linear_graphql tool (§10.5). Implements MCP JSON-RPC methods (initialize, tools/list, tools/call, notifications/initialized) routed through Claude's control-protocol mcp_message channel. The tool executes GraphQL via LinearClient and returns the response per §10.5's tool-result semantics.
