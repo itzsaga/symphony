@@ -2,6 +2,52 @@
 
 Reverse-chronological. Newest entries at the top.
 
+## 2026-05-21T02:52Z — Orchestrator (top-level group, 4 subtasks)
+
+**Status**: Completed. Suite total: 337 pass / 0 fail across 25 files (+70 tests across 6 new files).
+
+### State and reducer
+- `src/orchestrator/State.ts` — `OrchestratorRuntimeState` matching §4.1.8 with our internal `claude_*` token field names; `RunningEntry` per §4.1.5–§4.1.6 (issue snapshot, started_at, session_id, thread_id, last_event/timestamp/message, token counters incl. `last_reported_*`, retry_attempt, turn_count); `RetryEntry` per §4.1.7 (`Fiber.Fiber<void, never>` for `timer_handle`); pure `reduce(state, event): { state, sideEffects }` using `Match.value(event).pipe(Match.tagsExhaustive({...}))` so unhandled variants are a compile error. Exported constants `CONTINUATION_RETRY_DELAY_MS = 1000`, `DEFAULT_MAX_RETRY_BACKOFF_MS = 300_000`, `DEFAULT_MAX_CONCURRENT_AGENTS = 10`.
+- `src/orchestrator/events.ts` — `OrchestratorEvent` tagged union (9 variants per §7.3 + the two non-§7.3 events: `WorkflowReloaded`, `ImmediateTickRequested`).
+- `src/orchestrator/sideEffects.ts` — `SideEffect` tagged union (`DispatchWorker`, `InterruptWorker`, `ScheduleRetry`, `CancelRetry`, `CleanupWorkspace`, `UpdateIssueSnapshot`, `Log`, `EmitMetric`).
+- `test/unit/orchestrator/State.test.ts` — 25 tests (initial state, every event variant, exhaustiveness sweep, token delta math, retry cancel on WorkerStarted, normal-vs-abnormal exit retry scheduling, case-insensitive state match).
+
+### Dispatch
+- `src/orchestrator/Dispatch.ts` — `selectDispatchBatch(candidates, state, config): { toDispatch, reasons_skipped }`, pure. Eligibility per §8.2: required fields, active-not-terminal state, not-running, not-claimed, todo-blocker-non-terminal, global slot (recomputed as `toDispatch` accumulates), per-state slot fallback to global. `SkipReason` discriminated union (6 variants: `StateNotActive | AlreadyRunning | AlreadyClaimed | TodoBlocked | NoGlobalSlot | NoPerStateSlot`). Stable §8.2 sort: priority asc (null last), `created_at` oldest first, `identifier` lex tie-breaker.
+- `test/unit/orchestrator/Dispatch.test.ts` — 25 tests including the §8.2 regression "blockers exist but all terminal is eligible".
+
+### Reconcile
+- `src/orchestrator/Reconcile.ts` — `reconcileStalled(state, config, now)` (Part A: `elapsed_ms > stall_timeout_ms` with `last_event_at ?? started_at`, disabled when `stall_timeout_ms <= 0`) and `reconcileTrackerStates(state, refreshed, terminal_states, active_states)` (Part B: terminal → InterruptWorker + CleanupWorkspace; active → UpdateIssueSnapshot; neither → InterruptWorker only). Both pure, deterministic; `now` is passed in for `TestClock`-friendly tests.
+- Returns the richer `{ events, sideEffects }` shape rather than the spec's literal `ReadonlyArray<SideEffect>` — because Part A also emits a `StallDetected` event in addition to side effects, and emitting events through a side-effect array would be a type lie.
+- `test/unit/orchestrator/Reconcile.test.ts` — 20 tests.
+
+### Retry + tick fiber
+- `src/orchestrator/Retry.ts` — Pure backoff math (`computeFailureBackoffMs`, `computeContinuationDelayMs`), `RetryRegistry` with cancel-then-replace semantics, `retryTimerEffect` driven by `Effect.sleep` so tests run under `TestClock`.
+- `src/orchestrator/Worker.ts` — Per-issue worker pipeline: workspace prepare → `after_create` hook (only if `created_now`) → prompt render → spawn `claude` via `ClaudeSubprocess` → `ControlProtocol.serve` with `McpServer.handle` as the `mcpMessage` handler → ingest frames via `EventMapping.mapFrame` → enqueue runtime events into the orchestrator queue → turn loop (`runBeforeRun` → wait for `TurnCompleted`/`TurnFailed`/`TurnInputRequired` → `runAfterRun` → refresh issue state → break if state non-active or `turn_count >= max_turns`). `claude` subprocess scope is a child `Effect.scoped` block so a stall-driven interrupt tears it down cleanly.
+- `src/orchestrator/Orchestrator.ts` — `Orchestrator` `Context.Tag` (`state: Effect<OrchestratorRuntimeState>`, `stateChanges: Stream`, `enqueue: (event) => Effect<void>`). `OrchestratorLive` scoped Layer: forks consumer fiber (drains bounded `Queue<OrchestratorEvent>(1024)`, applies `reduce`, interprets side effects), tick fiber (poll loop at `state.poll_interval_ms`, calls `reconcileStalled` → `LinearClient.fetchIssuesByStates` → `reconcileTrackerStates` → `validateForDispatch` → `LinearClient.fetchCandidateIssues` → `selectDispatchBatch`), workflow-reload subscriber on `WorkflowLoader.changes`. `ImmediateTickRequested` fires the tick immediately and resets the next-tick countdown.
+- `test/unit/orchestrator/{Retry,Worker,Orchestrator}.test.ts` — 25 new tests (14 Retry under `TestClock`; 3 Worker abnormal paths; 8 Orchestrator integration: poll tick fires, immediate tick coalesces, workflow reload propagates interval, abnormal-exit backoff, slot exhaustion at retry-fire re-queues, stall reconcile interrupts running worker, stateChanges stream, smoke).
+
+### Cross-cutting schema additions (in scope per spec wiring)
+- `src/config/WorkflowSchema.ts` + `src/config/parseWorkflow.ts` — Added three previously-missing fields to `AgentRunnerSchema` + `TypedConfig`:
+  - `max_concurrent_agents` (default 10) — global slot cap per spec §5.3.5.
+  - `max_concurrent_agents_by_state` (default `{}`) — per-state cap map.
+  - `max_retry_backoff_ms` (default 300_000) — cap for §8.4 exponential backoff.
+- `Dispatch.ts` now reads `max_concurrent_agents` and `max_concurrent_agents_by_state` as typed fields (replacing the structural `Record<string, unknown>` reads it shipped with).
+- `State.ts::initialState` now seeds `state.max_concurrent_agents` from `config.agent_runner.max_concurrent_agents`; `onWorkflowReloaded` honors live changes to that field per §6.2.
+- Test fixtures across `argv`, `ClaudeSubprocess`, `McpServer`, `parseWorkflow`, `LinearClient`, `Hooks`, `WorkspaceManager`, `Dispatch`, `Reconcile`, `State` updated to include the three new fields.
+
+### Decisions worth flagging
+- **Dual-path reconcile resolution.** The reducer's `onReconciliationStateRefresh` and `onStallDetected` handlers stay intact (already covered by `State.test.ts`). The tick fiber routes through `Reconcile.ts` directly for Part A/B effects, not through `ReconciliationStateRefresh` events — that reducer branch is now dead code reachable only from existing tests. Decision: leave it for now (touching the reducer outside this task's scope risks breaking those tests for no behavioral benefit). Cleanup is a future PR.
+- **`UpdateIssueSnapshot` semantics.** Updates only `entry.issue.state` from the refreshed minimal projection, matching the reducer's existing branch. Other Issue fields stay frozen until the next candidate fetch.
+- **`CleanupWorkspace` does not run `before_remove`** in the reconcile-driven path — by the time the side effect fires, the worker scope (which owned the `Workspace` handle) has already torn down, and synthesizing a hook-compatible `Workspace` would duplicate path resolution. Documented inline; follow-up tracked.
+- **§16.6 retry-fire re-queue** updates the SubscriptionRef directly when `selectDispatchBatch` returns no toDispatch entries — because `onRetryTimerFired` already removed the prior entry, and nothing else would re-insert it.
+- **Continuation prompt is hard-coded** (`"Continue working on issue X. This is turn N."`). A future task can expose `continuation_template` in WORKFLOW.md.
+- **TestClock used for `Retry.test.ts` only.** Orchestrator integration tests use real `Effect.sleep` with short intervals (100–500ms) because the synthesis cost of injecting a TestClock through the whole fiber graph isn't worth it for an integration test that just needs to observe one or two ticks.
+
+### Latent observations (not fixed, out of scope)
+- Worker turn loop polls `turnEndedRef` at 50ms granularity (no `Deferred`-per-turn). Acceptable for v1 pacing.
+- `before_remove` hook coverage for the reconcile-driven cleanup path is a documented gap; running it would require carrying `Workspace` handles outside the worker scope.
+
 ## 2026-05-21T00:55Z — In-process MCP server and linear_graphql tool (top-level, 1 leaf)
 
 **Status**: Completed. Suite total: 242 pass / 0 fail across 19 files (+21 tests, +1 file).

@@ -156,6 +156,17 @@ export const HooksSchema = Schema.Struct({
 
 /* ----------------------------- agent_runner ----------------------------- */
 
+/**
+ * Map of state-name to per-state concurrency cap. Keys are matched
+ * case-insensitively by the dispatcher (§4.2 / §8.3); the schema preserves
+ * the operator's casing as written so error messages stay recognizable.
+ * Values are non-negative integers.
+ */
+const MaxConcurrentByState = Schema.Record({
+  key: Schema.String,
+  value: NonNegInt,
+});
+
 export const AgentRunnerSchema = Schema.Struct({
   kind: Schema.optionalWith(AgentRunnerKind, {
     default: () => "claude_code" as const,
@@ -178,6 +189,21 @@ export const AgentRunnerSchema = Schema.Struct({
   bare: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   extra_args: Schema.optionalWith(Schema.Array(Schema.String), {
     default: () => [] as ReadonlyArray<string>,
+  }),
+  // Spec §5.3.5 / §8.3: global concurrency cap. Default 10 matches §5.3.5
+  // and `DEFAULT_MAX_CONCURRENT_AGENTS` in src/orchestrator/State.ts.
+  max_concurrent_agents: Schema.optionalWith(NonNegInt, {
+    default: () => 10,
+  }),
+  // Spec §5.3.5 / §8.3: optional per-state caps. Absent = no per-state gate
+  // (only the global cap applies). Empty object is also accepted.
+  max_concurrent_agents_by_state: Schema.optionalWith(MaxConcurrentByState, {
+    default: () => ({}) as Record<string, number>,
+  }),
+  // Spec §5.3.5 / §8.4: cap on the exponential-backoff power, in ms.
+  // Default 300_000 = 5 minutes.
+  max_retry_backoff_ms: Schema.optionalWith(NonNegInt, {
+    default: () => 300_000,
   }),
 });
 
@@ -271,6 +297,9 @@ export interface TypedConfig {
     readonly network_profile: string;
     readonly bare: boolean;
     readonly extra_args: ReadonlyArray<string>;
+    readonly max_concurrent_agents: number;
+    readonly max_concurrent_agents_by_state: Readonly<Record<string, number>>;
+    readonly max_retry_backoff_ms: number;
   };
   readonly server: { readonly port: number } | null;
 }

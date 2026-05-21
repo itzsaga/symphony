@@ -87,19 +87,19 @@
   subtasks:
     - name: Orchestrator state and reducer
       description: Define OrchestratorRuntimeState (§4.1.8) and a pure reducer for every transition trigger (§7.3). State held in a SubscriptionRef so HTTP observers can subscribe. Reducer is total; every event has a transition.
-      status: defined
+      status: completed
       spec: specs/orchestrator-state.md
     - name: Dispatch (candidate selection, sorting, slots)
       description: Implement §8.2 eligibility, §8.3 concurrency (global + per-state), and dispatch sort order. Pure functions given (issues, state, config) → (dispatch_decisions, new_state).
-      status: defined
+      status: completed
       spec: specs/orchestrator-dispatch.md
     - name: Reconciliation (stall + tracker state refresh)
       description: Implement §8.5 part A (stall detection using last_codex_timestamp / started_at vs stall_timeout_ms) and part B (tracker state refresh, terminate-on-terminal-with-cleanup, terminate-on-non-active-without-cleanup, update-on-active).
-      status: defined
+      status: completed
       spec: specs/orchestrator-reconcile.md
     - name: Retry + tick fiber
       description: 'Fiber-based retry timers (§8.4: continuation = 1s fixed, failure = 10000 * 2^(attempt-1) capped). Retry timer fibers stored in retry_attempts; cancel = Fiber.interrupt. Tick fiber drives the poll loop at config.polling.interval_ms (§8.1).'
-      status: defined
+      status: completed
       spec: specs/orchestrator-retry-and-tick.md
 - name: HTTP server extension
   description: OPTIONAL §13.7 extension, but in scope for v1. Read-only API + dashboard.

@@ -117,6 +117,9 @@ server:
       network_profile: "claude-code",
       bare: true,
       extra_args: ["--add-dir", "/extra"],
+      max_concurrent_agents: 10,
+      max_concurrent_agents_by_state: {},
+      max_retry_backoff_ms: 300_000,
     });
     expect(wf.config.server).toEqual({ port: 8080 });
   });
@@ -151,6 +154,9 @@ server:
     expect(wf.config.agent_runner.network_profile).toBe("claude-code");
     expect(wf.config.agent_runner.bare).toBe(false);
     expect(wf.config.agent_runner.extra_args).toEqual([]);
+    expect(wf.config.agent_runner.max_concurrent_agents).toBe(10);
+    expect(wf.config.agent_runner.max_concurrent_agents_by_state).toEqual({});
+    expect(wf.config.agent_runner.max_retry_backoff_ms).toBe(300_000);
     expect(wf.config.server).toBeNull();
     expect(wf.prompt_template).toBe("hello body");
   });
@@ -361,6 +367,9 @@ describe("validateForDispatch", () => {
         network_profile: "claude-code",
         bare: false,
         extra_args: [],
+        max_concurrent_agents: 10,
+        max_concurrent_agents_by_state: {},
+        max_retry_backoff_ms: 300_000,
       },
       server: null,
     },

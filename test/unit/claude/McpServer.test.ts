@@ -74,6 +74,9 @@ const fakeConfig = (
     network_profile: "claude-code",
     bare: false,
     extra_args: [],
+    max_concurrent_agents: 10,
+    max_concurrent_agents_by_state: {},
+    max_retry_backoff_ms: 300_000,
   },
   server: null,
 });

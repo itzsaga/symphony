@@ -321,6 +321,10 @@ export const parseWorkflow = (
         network_profile: decoded.agent_runner.network_profile,
         bare: decoded.agent_runner.bare,
         extra_args: decoded.agent_runner.extra_args,
+        max_concurrent_agents: decoded.agent_runner.max_concurrent_agents,
+        max_concurrent_agents_by_state:
+          decoded.agent_runner.max_concurrent_agents_by_state,
+        max_retry_backoff_ms: decoded.agent_runner.max_retry_backoff_ms,
       },
       server: decoded.server,
     };
