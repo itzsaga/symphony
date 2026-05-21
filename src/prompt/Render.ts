@@ -118,12 +118,16 @@ const toTemplateError = (cause: unknown): TemplateError => {
  * retry/continuation run. liquidjs evaluates `null` as falsy in `{% if %}`
  * (§5.4 + §12.3).
  *
+ * `turn_index` is optional; when supplied (the continuation-prompt path)
+ * it is exposed to the template as a 1-based turn counter the same way
+ * `attempt` is exposed for retry templates.
+ *
  * The §5.4 fallback fires only when the input template is empty/whitespace —
  * a non-empty template that legitimately renders to `""` is returned as-is.
  */
 export const renderPrompt = (
   template: string,
-  vars: { issue: Issue; attempt: number | null },
+  vars: { issue: Issue; attempt: number | null; turn_index?: number },
 ): Effect.Effect<string, TemplateError> =>
   Effect.gen(function* () {
     if (template.trim() === "") {

@@ -205,6 +205,17 @@ export const AgentRunnerSchema = Schema.Struct({
   max_retry_backoff_ms: Schema.optionalWith(NonNegInt, {
     default: () => 300_000,
   }),
+  // Optional Liquid template rendered between turns (§5.4). When null, the
+  // worker uses a built-in fallback that re-affirms the active issue. When
+  // present, it's rendered through the same strict-Liquid engine as the
+  // initial prompt body, with `{ issue, attempt, turn_index }` in scope —
+  // `turn_index` is 1-based (the first continuation turn renders with
+  // `turn_index = 1`, matching the wording the built-in fallback used to
+  // emit).
+  continuation_prompt: Schema.optionalWith(
+    Schema.NullOr(Schema.String),
+    { default: () => null },
+  ),
 });
 
 /* -------------------------------- server -------------------------------- */
@@ -300,6 +311,7 @@ export interface TypedConfig {
     readonly max_concurrent_agents: number;
     readonly max_concurrent_agents_by_state: Readonly<Record<string, number>>;
     readonly max_retry_backoff_ms: number;
+    readonly continuation_prompt: string | null;
   };
   readonly server: { readonly port: number } | null;
 }

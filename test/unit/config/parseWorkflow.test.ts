@@ -120,6 +120,7 @@ server:
       max_concurrent_agents: 10,
       max_concurrent_agents_by_state: {},
       max_retry_backoff_ms: 300_000,
+      continuation_prompt: null,
     });
     expect(wf.config.server).toEqual({ port: 8080 });
   });
@@ -157,8 +158,23 @@ server:
     expect(wf.config.agent_runner.max_concurrent_agents).toBe(10);
     expect(wf.config.agent_runner.max_concurrent_agents_by_state).toEqual({});
     expect(wf.config.agent_runner.max_retry_backoff_ms).toBe(300_000);
+    expect(wf.config.agent_runner.continuation_prompt).toBeNull();
     expect(wf.config.server).toBeNull();
     expect(wf.prompt_template).toBe("hello body");
+  });
+
+  it("accepts agent_runner.continuation_prompt as a Liquid template string", async () => {
+    const content = `---
+agent_runner:
+  continuation_prompt: |
+    Continue {{ issue.identifier }} (turn {{ turn_index }}).
+---
+body
+`;
+    const wf = await runOk(parseWorkflow(content, FIXTURE_PATH));
+    expect(wf.config.agent_runner.continuation_prompt).toBe(
+      "Continue {{ issue.identifier }} (turn {{ turn_index }}).\n",
+    );
   });
 
   it("resolves $VAR indirection on tracker.api_key", async () => {
@@ -370,6 +386,7 @@ describe("validateForDispatch", () => {
         max_concurrent_agents: 10,
         max_concurrent_agents_by_state: {},
         max_retry_backoff_ms: 300_000,
+        continuation_prompt: null,
       },
       server: null,
     },

@@ -109,12 +109,12 @@ const buildMcpConfigBlob = (): string =>
 /* -------------------------------------------------------------------------- */
 
 /**
- * Synthesize a brief "continue" prompt for follow-on turns. v1's strategy is
- * the simplest one that works: re-affirm the active issue and let Claude
- * decide what to do next. A future task can move this into WORKFLOW.md's
- * prompt block as an opt-in template (§5.4).
+ * Built-in fallback prompt used when `agent_runner.continuation_prompt` is
+ * null. Re-affirms the active issue and lets Claude decide what to do next.
+ * `turnIndex` here is 0-based (the loop's internal counter); the rendered
+ * sentence reads "turn N+1" so the operator sees a 1-based count.
  */
-const continuationPrompt = (issue: Issue, turnIndex: number): string =>
+const defaultContinuationPrompt = (issue: Issue, turnIndex: number): string =>
   `Continue working on issue ${issue.identifier} (${issue.title}). This is turn ${turnIndex + 1}.`;
 
 /* -------------------------------------------------------------------------- */
@@ -474,7 +474,29 @@ export const runWorker = (
             outcome = normal();
             break;
           }
-          currentPrompt = continuationPrompt(issue, turnIndex);
+          // Render the operator-configured continuation_prompt if set;
+          // otherwise fall back to the built-in. A template render error is
+          // treated as abnormal — the operator wrote a bad template and
+          // should know.
+          const tpl = input.workflow.config.agent_runner.continuation_prompt;
+          if (tpl === null) {
+            currentPrompt = defaultContinuationPrompt(issue, turnIndex);
+          } else {
+            const rendered = yield* Effect.either(
+              renderPrompt(tpl, {
+                issue,
+                attempt: input.retry_attempt,
+                turn_index: turnIndex,
+              }),
+            );
+            if (Either.isLeft(rendered)) {
+              outcome = abnormal(
+                `continuation_prompt render failed: ${rendered.left._tag}`,
+              );
+              break;
+            }
+            currentPrompt = rendered.right;
+          }
         }
 
         if (outcome === null) {

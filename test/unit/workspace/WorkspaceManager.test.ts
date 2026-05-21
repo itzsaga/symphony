@@ -75,6 +75,7 @@ const buildConfig = (workspaceRoot: string): TypedConfig => ({
     max_concurrent_agents: 10,
     max_concurrent_agents_by_state: {},
     max_retry_backoff_ms: 300_000,
+    continuation_prompt: null,
   },
   server: null,
 });

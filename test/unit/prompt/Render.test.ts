@@ -104,6 +104,18 @@ describe("renderPrompt", () => {
     expect(retry).toBe("retry");
   });
 
+  it("exposes turn_index to continuation templates", async () => {
+    const tpl = "Continue {{ issue.identifier }} (turn {{ turn_index }})";
+    const out = await runOk(
+      renderPrompt(tpl, {
+        issue: sampleIssue(),
+        attempt: null,
+        turn_index: 3,
+      }),
+    );
+    expect(out).toBe("Continue ABC-1 (turn 3)");
+  });
+
   it("returns the §5.4 fallback for an empty template body", async () => {
     const out = await runOk(
       renderPrompt("", { issue: sampleIssue(), attempt: null }),

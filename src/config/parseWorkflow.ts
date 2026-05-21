@@ -325,6 +325,7 @@ export const parseWorkflow = (
         max_concurrent_agents_by_state:
           decoded.agent_runner.max_concurrent_agents_by_state,
         max_retry_backoff_ms: decoded.agent_runner.max_retry_backoff_ms,
+        continuation_prompt: decoded.agent_runner.continuation_prompt,
       },
       server: decoded.server,
     };

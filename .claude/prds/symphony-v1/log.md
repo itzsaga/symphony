@@ -2,6 +2,42 @@
 
 Reverse-chronological. Newest entries at the top.
 
+## 2026-05-21T18:11Z — Post-v1 follow-ups (triage round)
+
+After the v1 acceptance gate landed (commit `bae256b`), Seth asked which of the
+flagged latent observations were simple changes. A triage doc lives at
+`~/.claude/plans/which-follow-ups-are-gleaming-cocke.md`; this entry covers
+what got built. The non-trivial items (#2 reconcile-driven before_remove, #3
+recent_events §10.4 kind tagging, #6 stubWorkflowLoader fixture dedup, #9
+Deferred-per-turn, #10 stronger audit invariants) stayed deferred.
+
+### Commit `15ee1fe` — orchestrator cleanup (#1 + #8)
+
+**Status**: 413 → 408 pass (the 5 deleted tests were the `ReconciliationStateRefresh` describe block, all duplicated by `Reconcile.test.ts` coverage).
+
+- `ReconciliationStateRefresh` event + reducer handler + Match case + test block deleted. Verified the tick fiber never enqueues it — `Orchestrator.ts` calls `reconcileTrackerStates` directly and interprets its side effects (`UpdateIssueSnapshot` / `InterruptWorker` / `CleanupWorkspace`), so the event was reachable only from State.test.ts.
+- `StallDetected` event + handler kept. Verified `reconcileStalled` emits `StallDetected` events that the tick fiber enqueues (`Orchestrator.ts:310-313`) — the reducer's `onStallDetected` produces the matching `InterruptWorker`, which the interpreter synthesizes a `WorkerExited(abnormal)` from. Removing it would have broken the stall-detection path.
+- Retry math deduped: `computeFailureBackoffMs(attempt, capMs)`, `FAILURE_RETRY_BASE_MS`, and `DEFAULT_MAX_RETRY_BACKOFF_MS` are now defined exclusively in `Retry.ts`. State.ts and Reconcile.ts import them. State.ts re-exports `CONTINUATION_RETRY_DELAY_MS` and `DEFAULT_MAX_RETRY_BACKOFF_MS` so `State.test.ts`'s import path doesn't churn.
+- Residual asymmetry flagged in `Retry.ts`: the reducer's `onWorkerExited` and `Reconcile.reconcileStalled` both pass `DEFAULT_MAX_RETRY_BACKOFF_MS` as the cap (hardcoded 300_000), while the orchestrator's runtime `handleRetryFire` reads the live `config.agent_runner.max_retry_backoff_ms`. They agree at the default; a config override only affects the runtime path until the reducer/reconciler are threaded with config too. Left as-is — the reducer is intentionally config-free.
+
+### Commit `<follow-up>` — continuation_prompt template (#4)
+
+**Status**: 408 → 410 pass (+2 new tests).
+
+- `agent_runner.continuation_prompt` added to `WorkflowSchema.AgentRunnerSchema` as `Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null })`. Threaded through `parseWorkflow.ts` and `TypedConfig.agent_runner`.
+- `renderPrompt` extended with an optional `turn_index?: number` in the vars object so continuation templates can expose a 1-based turn counter (`{{ turn_index }}`).
+- `Worker.ts`'s `defaultContinuationPrompt` is now the fallback used only when `agent_runner.continuation_prompt` is `null`. When the operator configures a template, the worker calls `renderPrompt(template, { issue, attempt, turn_index })` with `turn_index = turnIndex` (1-based from the worker's perspective — `turnIndex` increments before the continuation prompt is rendered for the next turn). A template render failure short-circuits the loop with `outcome = abnormal("continuation_prompt render failed: <tag>")`.
+- Tests added: `parseWorkflow.test.ts` decode of a Liquid-bearing `continuation_prompt`; `Render.test.ts` exposing `turn_index` to the template. Default-null path remains exercised by the existing default-fill test.
+- All `agent_runner` test fixtures across the suite updated to include `continuation_prompt: null` (or the threaded `decoded.agent_runner.continuation_prompt`). Touched: `argv`, `ClaudeSubprocess`, `McpServer`, `parseWorkflow`, `LinearClient`, `Hooks`, `WorkspaceManager`, `Dispatch`, `Worker`, `Orchestrator`, `State`, `Reconcile`.
+
+### Skipped — #7 server finalizer race
+
+Re-triage found the original "simple ~3-5 line wrap" verdict was wrong: `BunHttpServer.layer`'s internal Bun.Server is not exposed via `HttpServer.HttpServer`, so calling `server.stop(true)` and awaiting it requires reimplementing the entire `BunHttpServer.layer` (~80–100 LOC of subtle drain/websocket plumbing). The race only manifests under long-lived keep-alive connections — the existing teardown test confirms clean exit at v1 scale. Skipped with this note; a proper fix is its own task.
+
+### Skipped — #5 attempts.restart_count
+
+Not a follow-up. `restart_count` is hardcoded to `0` in `src/http/snapshot.ts` because v1 has no separate restart counter (only retry attempts). Tracking it for real would require a new field on `RunningEntry`, increment sites in the worker/retry paths, and a persistence story — that's §18.2-class work, not a leftover. The v1 answer is "always 0", which is shipped.
+
 ## 2026-05-21T17:21Z — Test matrix verification (top-level group, 2 subtasks)
 
 **Status**: Completed. PRD v1 acceptance gate is now green. Suite total: 413 pass / 5 skip / 0 fail across 33 files (+5 skipped tests, +1 file; no new passing tests required — the §17 audit found zero coverage gaps).

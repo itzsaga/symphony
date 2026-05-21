@@ -94,6 +94,7 @@ const baseConfig = (
       max_retry_backoff_ms:
         patch.max_retry_backoff_ms ??
         decoded.agent_runner.max_retry_backoff_ms,
+      continuation_prompt: decoded.agent_runner.continuation_prompt,
     },
     server: null,
   };
