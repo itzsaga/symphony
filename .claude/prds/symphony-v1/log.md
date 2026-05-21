@@ -2,6 +2,40 @@
 
 Reverse-chronological. Newest entries at the top.
 
+## 2026-05-21T13:58Z — Application wiring and startup (top-level, 1 leaf)
+
+**Status**: Completed. Suite total: 408 pass / 0 fail across 31 files (+25 tests across 2 new files).
+
+### Changes
+- `src/main.ts` — Replaced the bootstrap stub with the full daemon entrypoint: parse argv via `parseCli`, build the layer graph bottom-up, run the §8.6 startup terminal-workspace cleanup, then block on a `Deferred<void>` so the orchestrator's tick fiber owns the lifetime. `BunRuntime.runMain` handles signal-as-interrupt and exit codes; custom `teardown` maps both Success and Interrupt cause to exit 0 per §17.7.
+- `src/cli.ts` — Pure `parseCli(argv)` returning `{ workflowPath, port, errors }`. Hand-parsed: positional first, then `--port <N>` / `--port=<N>`. Rejects unknown flags, malformed values, out-of-range ports, multiple positionals. Exports `USAGE`. No CLI library dependency.
+- `src/orchestrator/Orchestrator.ts` — Fixed the `workspace_path` bug flagged by the HTTP task: `forkOneWorker` now computes the per-issue path via `resolveWorkspacePath(root, identifier)` (the same resolver `WorkspaceManager.prepareForIssue` uses) and threads it into `newRunningEntry`. The §13.7.2 dashboard/JSON now surfaces e.g. `/tmp/symphony_workspaces/MT-649` instead of the bare workspace root.
+- `test/unit/cli.test.ts` — 18 tests covering positional/`--port`/`--port=`/port-0/max-port/both-args, unknown long & short flags, missing port value, non-numeric/out-of-range/negative/non-integer/empty port values, second-positional error, and multi-error collection.
+- `test/integration/startup.test.ts` — 7 subprocess-driven tests: nonexistent explicit path → exit nonzero with stderr referencing the missing file; missing default `./WORKFLOW.md`; unknown flag; malformed `--port`; clean SIGTERM exit (no HTTP); `--port 0` ephemeral HTTP serving `/api/v1/state` returning 200; clean SIGINT exit.
+
+### Layer composition (final shape)
+- `LoggerLive` at the root.
+- `Sandbox.Live` → `LinearClient.Live`, `WorkspaceManager.Live`, `WorkspaceHooks.Live`, `Prompt` (pure), `WorkflowLoader.Live`.
+- `McpServerLive` depends on `LinearClient` + `Logger`.
+- `OrchestratorLive` depends on `WorkflowLoader`, `LinearClient`, `WorkspaceManager`, `WorkspaceHooks`, `Sandbox`, `McpServer`, `Logger`.
+- `ServerLive` + `RoutesLive` peer-merged via `Layer.mergeAll(ServerLive, RoutesLive)` (the load-bearing rule from the HTTP task) so both share the same `SymphonyHttpRouter.Live` instance and the routes actually land in the served snapshot.
+- `CliFlags` is built per-startup as `Layer.succeed(CliFlags, { port })` from the already-parsed CLI value, so argv is only parsed once (not re-parsed by `CliFlagsLive`).
+
+### Startup sequence (§16.1)
+1. `parseCli(argv)`. Bad CLI → exit nonzero with usage and stderr error.
+2. Layer build (includes `WorkflowLoader` preflight). Bad workflow → `Effect.tapErrorCause` writes `startup failure: <cause>` to stderr, exit nonzero.
+3. §8.6 startup cleanup: `LinearClient.fetchIssuesByStates(config.tracker.terminal_states)` → `WorkspaceManager.startupTerminalCleanup(identifiers)`. Fetch failure logs warn and continues; cleanup failure logs warn per-workspace and continues.
+4. Block on `Deferred<void>` until interrupted.
+
+### Decisions
+- **`BunRuntime.runMain` over hand-rolled signal hooks.** Already handles signal-as-interrupt + exit codes; rolling our own would duplicate the logic and risk drift.
+- **CliFlags stays in `src/http/Server.ts`** because `--port` is the only HTTP flag and the Tag stays single-purpose. `main.ts` builds its own `Layer.succeed(CliFlags, { port })` from `parseCli`'s output.
+- **Workspace-path fix uses the pure resolver** rather than threading the value out of `WorkspaceManager.prepareForIssue`. `newRunningEntry` must be built BEFORE `WorkerStarted` fires, but `prepareForIssue` runs inside `runWorker` later in the fiber lifecycle. Both sides agree because they share `resolveWorkspacePath`.
+- **`test/integration/` is a new directory.** Startup tests aren't `LINEAR_API_KEY`-gated because they use a fake key in fixtures; they exercise startup/signals/HTTP, not §17.8 real-Linear behavior. §17.8 gating belongs to the next top-level task.
+
+### Latent observations
+- `bun test`'s default discovery picks up `test/integration/**` automatically. The §17.8 audit task will need to either gate at the `it` level or split test patterns in `package.json`. Startup tests should keep running unconditionally.
+
 ## 2026-05-21T13:46Z — HTTP server extension (top-level group, 2 subtasks)
 
 **Status**: Completed. Suite total: 383 pass / 0 fail across 29 files (+46 tests across 4 new files).

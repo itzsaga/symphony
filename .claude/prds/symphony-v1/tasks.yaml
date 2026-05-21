@@ -114,7 +114,7 @@
       spec: specs/http-api-and-dashboard.md
 - name: Application wiring and startup
   description: Assemble all Layers, parse the CLI (workflow path argument per §17.7), do startup terminal workspace cleanup (§8.6), handle SIGINT/SIGTERM for coordinated shutdown, exit codes per §17.7.
-  status: defined
+  status: completed
   spec: specs/application-wiring.md
   subtasks: []
 - name: TRUST.md

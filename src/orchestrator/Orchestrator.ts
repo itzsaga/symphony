@@ -19,6 +19,10 @@ import { Sandbox } from "../sandbox/Nono.ts";
 import { McpServer } from "../claude/McpServer.ts";
 import { WorkspaceHooks } from "../workspace/Hooks.ts";
 import { WorkspaceManager } from "../workspace/WorkspaceManager.ts";
+import {
+  resolveWorkspacePath,
+  toAbsolutePathSync,
+} from "../config/PathSafety.ts";
 import { selectDispatchBatch } from "./Dispatch.ts";
 import {
   RetryTimerFired,
@@ -392,9 +396,17 @@ const forkOneWorker = (
     const retry = currentState.retry_attempts.get(issue.id);
     const retryAttempt = retry?.attempt ?? null;
     const startedAt = new Date();
+    // Per-issue workspace path per §13.7.2: dashboard / API consumers expect
+    // the actual per-issue directory (e.g. `<root>/MT-649`), not the bare
+    // root. We compute it deterministically from the configured root + the
+    // issue identifier using the same sanitization the WorkspaceManager
+    // applies inside `prepareForIssue`, so the strings match even before the
+    // worker has materialized the directory.
+    const workspaceRoot = toAbsolutePathSync(workflow.config.workspace.root);
+    const workspacePath = resolveWorkspacePath(workspaceRoot, issue.identifier);
     const runningEntry = newRunningEntry({
       issue,
-      workspace_path: workflow.config.workspace.root,
+      workspace_path: workspacePath,
       started_at: startedAt,
       attempt: null,
       retry_attempt: retryAttempt,
