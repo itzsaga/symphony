@@ -2,6 +2,19 @@
 
 Reverse-chronological. Newest entries at the top.
 
+## 2026-05-21T14:19Z — TRUST.md (top-level, 1 leaf)
+
+**Status**: Completed. Suite total: 413 pass / 0 fail across 32 files (+5 tests, +1 file).
+
+### Changes
+- `TRUST.md` — 190-line trust-model document at repo root. Eight numbered sections: (1) trust model summary (single-operator, sandbox-first), (2) the actual `nono` policy for `claude` invocations split by `agent_runner.bare`, including `~/.claude` access semantics + hook profile choice, (3) agent approval policy (`--permission-mode bypassPermissions --permission-prompt-tool stdio`; `can_use_tool` denied with `interrupt: true`), (4) user-input-required handling (fail run + orchestrator retry), (5) `linear_graphql` scoping caveats (operator provisions minimum-scope API key), (6) hook-script trust assumption per §15.4, (7) the two declared spec divergences (`claude` replaces `app-server`; `agent_runner.*` replaces `codex.*`), (8) secret handling per-mode, (9) honest "what this does NOT defend against" list (prompt injection in issue descriptions, malicious GraphQL responses, supply-chain compromise, etc.).
+- `test/unit/docs/TRUST.md.test.ts` — 5 tests covering: file exists, contains the literal sentinel `nono run --network-profile claude-code` (so sandbox-argv drift surfaces as a test failure), references both spec divergences with regex matching that tolerates light copy-editing, references `agent_runner.bare` semantics, and notes the §15.4 hook-script trust assumption.
+
+### Decisions
+- **Doc reflects code reality, not the spec's illustrative argv.** Verified that `src/sandbox/policies.ts::agentRunnerArgv` emits in the same order as the spec example (credentials → workspace → workflow-dir read → `~/.claude` read|allow → system-bin reads → `--`). No drift detected.
+- **`test/unit/docs/` is a new directory** for doc-invariant tests. Future SPEC.md vendor-freshness checks or AGENTS.md invariants belong here.
+- **Sentinel-argv test uses literal `toContain`** because that's the tie to sandbox argv shape; divergence assertions use bounded regex so light copy-editing of TRUST.md §7 doesn't break the test, but losing either divergence will.
+
 ## 2026-05-21T13:58Z — Application wiring and startup (top-level, 1 leaf)
 
 **Status**: Completed. Suite total: 408 pass / 0 fail across 31 files (+25 tests across 2 new files).

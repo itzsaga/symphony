@@ -119,7 +119,7 @@
   subtasks: []
 - name: TRUST.md
   description: 'Root-level trust-model document per spec §15.1 and §10.5. Covers: sandbox-first model with nono''s base profile spelled out; the two declared spec divergences (Claude in place of Codex; agent_runner.* in place of codex.*); high-trust agent posture + user-input-required handling; linear_graphql scoping; the §15.4 assumption that workflow hook scripts are fully trusted.'
-  status: defined
+  status: completed
   spec: specs/trust-md.md
   subtasks: []
 - name: Test matrix verification and real-integration profile
