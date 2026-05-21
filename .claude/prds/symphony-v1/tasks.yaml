@@ -127,9 +127,9 @@
   subtasks:
     - name: Section 17.1-17.7 coverage audit
       description: 'Cross-check every bullet in §17.1 through §17.7 against the test suite. For each bullet without coverage, add a test. Output: a checklist mapping each §17.x bullet to the test file/case that covers it (lives in test/section-17-coverage.md).'
-      status: defined
+      status: completed
       spec: specs/section-17-audit.md
     - name: Section 17.8 real Linear integration profile
       description: 'Implement the §17.8 gated profile: tests run only when LINEAR_API_KEY is set, use isolated test identifiers, clean up tracker artifacts. Skipped tests must report ''skipped'' (not silently pass). When the profile is explicitly enabled (env flag), failures fail the run.'
-      status: defined
+      status: completed
       spec: specs/linear-integration-profile.md

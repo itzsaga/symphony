@@ -8,7 +8,9 @@
     "dev": "bun run --watch src/main.ts ./WORKFLOW.md",
     "start": "bun run src/main.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "test:integration": "bun test test/integration/",
+    "typecheck": "tsc --noEmit",
+    "audit:section-17": "bun run scripts/audit-section-17.ts"
   },
   "dependencies": {
     "@effect/platform": "^0.96.1",
