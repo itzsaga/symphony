@@ -2,6 +2,32 @@
 
 Reverse-chronological. Newest entries at the top.
 
+## 2026-05-21T13:46Z — HTTP server extension (top-level group, 2 subtasks)
+
+**Status**: Completed. Suite total: 383 pass / 0 fail across 29 files (+46 tests across 4 new files).
+
+### HTTP server setup and port handling
+- `src/http/Server.ts` — `ServerLive` Layer (scoped via `BunHttpServer.layer` from `@effect/platform-bun`), `CliFlags` Tag + `CliFlagsLive` (parses `--port <N>` and `--port=<N>` from `Bun.argv.slice(2)`) + `CliFlagsTest(port)` for tests, `SymphonyHttpRouter` Tag built on `HttpRouter.Tag("symphony/http/Router")<SymphonyHttpRouter>()`, request-logging middleware (one JSONL info line per request: method/path/status/duration_ms), workflow-reload watcher that emits a warn record when `server.port` changes (restart-required, no hot-rebind). Loopback bind only. 5s idle timeout. No-op when neither CLI `--port` nor `server.port` is set (still provides the `SymphonyHttpRouter.Live` Tag so dependent Layers typecheck; logs an info record explaining).
+- `test/unit/http/Server.test.ts` — 9 tests: `parsePortFlag` (4 forms), `ServerLive` no-port no-op, CLI override, ephemeral port logging, listener teardown, workflow-reload warn.
+
+### JSON API and dashboard
+- `src/http/snapshot.ts` — `OrchestratorRuntimeState → ApiState` translator. Performs the spec-mandated boundary renames `claude_totals → codex_totals` and `*_session_logs → codex_session_logs` (the internal `claude_*` field names stay per `TRUST.md` divergence; only the HTTP wire surface uses `codex_*`). ISO-8601 timestamps via `Date.toISOString()`. `findByIdentifier` resolves a path segment to either a `RunningEntry` or `RetryEntry`, accepting both `issue_identifier` and raw `issue_id`.
+- `src/http/Dashboard.ts` — Server-rendered HTML for `/`. Tagged-template `html\`...\`` helper escapes every interpolated string through `escapeHtml`. Includes `<meta http-equiv="refresh" content="5">` (v1 polls via meta-refresh; no JS, no WebSocket/SSE), summary cards (running/retrying counts, token totals, cumulative runtime), running/retry/rate-limit/recent-event tables, inline stylesheet.
+- `src/http/Api.ts` — `RoutesLive` Layer contributing four routes via `SymphonyHttpRouter.use(...)`: `GET /`, `GET /api/v1/state` (§13.7.1 shape with the rename), `GET /api/v1/<identifier>` (§13.7.2 shape; resolves by identifier or id; 404 on miss), `POST /api/v1/refresh` (enqueues `ImmediateTickRequested`; coalesces within 1s via `Effect.Ref<{ lastQueuedAt: Date | null }>` and returns `{ queued: false, coalesced: true }` for duplicates). JSON error envelope `{ "error": { "code", "message" } }`. 405 + `Allow` header for unsupported methods on defined routes.
+- `test/unit/http/{snapshot,Dashboard,Api}.test.ts` — 36 tests: 13 snapshot (rename, ISO-8601 conversion, lookup-by-identifier-or-id), 13 Dashboard (`escapeHtml`, tagged template, full markup, XSS payload in identifier is not interpreted), 10 Api end-to-end against a real ephemeral-port server with stub Orchestrator/Logger (state shape, per-issue running view, per-issue retry view, 404 envelope, refresh enqueue + 1s coalescing, 405 for `PATCH /refresh` and `POST /state`, dashboard HTML, XSS guard).
+
+### Decisions
+- **Boundary rename location.** `claude_totals → codex_totals` and `codex_session_logs` happen exclusively in `snapshot.ts`; internal types unchanged. Documented inline.
+- **Single `/api/v1/:identifier` route with internal dispatch.** `find-my-way` (the router under `HttpRouter.Tag`) refuses to register both a method-specific route and an `all` route for the same path, and 405-with-Allow couldn't otherwise be expressed cleanly. `state` / `refresh` / `<identifier>` dispatch happens in the handler.
+- **Composition contract: `Layer.mergeAll(ServerLive, RoutesLive)`, not `Layer.provideMerge`.** `application-wiring.md` must use the merge form so both Layers share the same `SymphonyHttpRouter.Live` instance via the outer memoMap — otherwise the `serve` Layer captures an empty route snapshot. Documented in `RoutesLive`'s JSDoc. Worth a smoke test in the wiring task.
+- **`logs.codex_session_logs`** is always an explicit empty array in v1 (we don't persist session logs to file), not an omitted field.
+- **`attempts.restart_count`** hardcoded to 0 in v1 — we only track retry attempts, no separate restart counter. §18.2 persistence work would change that.
+
+### Latent observations (out of scope, flagged for follow-up)
+- **`RunningEntry.workspace_path` is the workspace ROOT, not the per-issue directory.** Origin: `src/orchestrator/Orchestrator.ts:397` writes `workspace_path: workflow.config.workspace.root` into `newRunningEntry`. The §13.7.2 example shows the per-issue path (e.g. `/tmp/symphony_workspaces/MT-649`). Fix is one of: (a) orchestrator resolves the per-issue path and stores that, or (b) `snapshot.ts` derives `<root>/<sanitize(identifier)>` at the boundary. Address in application-wiring or a follow-up.
+- **`recent_events[].event` field** falls back from `last_event` → `msg` (the Logger's actual wire field) because there's no §10.4-kind tag on log records today. Higher-fidelity feed would require the orchestrator/worker to attach `event_kind` to each log call.
+- **`@effect/platform-bun`'s server finalizer** doesn't await `server.stop()` — fine for clean shutdowns at v1 scale, but a long-lived keep-alive connection could delay teardown. Documented in `Server.test.ts`'s teardown comment.
+
 ## 2026-05-21T02:52Z — Orchestrator (top-level group, 4 subtasks)
 
 **Status**: Completed. Suite total: 337 pass / 0 fail across 25 files (+70 tests across 6 new files).

@@ -106,11 +106,11 @@
   subtasks:
     - name: HTTP server setup and port handling
       description: '@effect/platform HTTP server. CLI --port overrides server.port. Loopback bind default (§13.7). Graceful start/stop tied to the application Layer. Restart-required behavior for port changes is acceptable.'
-      status: defined
+      status: completed
       spec: specs/http-server-setup.md
     - name: JSON API and dashboard
       description: 'Endpoints: GET / (server-rendered HTML dashboard), GET /api/v1/state, GET /api/v1/<identifier>, POST /api/v1/refresh. Response shapes per §13.7.1 / §13.7.2. 404 on unknown identifier; 405 on unsupported methods; JSON error envelope. POST /refresh enqueues an ImmediateTick (coalesce if already pending).'
-      status: defined
+      status: completed
       spec: specs/http-api-and-dashboard.md
 - name: Application wiring and startup
   description: Assemble all Layers, parse the CLI (workflow path argument per §17.7), do startup terminal workspace cleanup (§8.6), handle SIGINT/SIGTERM for coordinated shutdown, exit codes per §17.7.
