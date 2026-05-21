@@ -5,11 +5,8 @@ Reverse-chronological. Newest entries at the top.
 ## 2026-05-21T18:11Z — Post-v1 follow-ups (triage round)
 
 After the v1 acceptance gate landed (commit `bae256b`), Seth asked which of the
-flagged latent observations were simple changes. A triage doc lives at
-`~/.claude/plans/which-follow-ups-are-gleaming-cocke.md`; this entry covers
-what got built. The non-trivial items (#2 reconcile-driven before_remove, #3
-recent_events §10.4 kind tagging, #6 stubWorkflowLoader fixture dedup, #9
-Deferred-per-turn, #10 stronger audit invariants) stayed deferred.
+flagged latent observations were simple changes. This entry covers both what
+got built and what stayed deferred with the why-not-now for each item.
 
 ### Commit `15ee1fe` — orchestrator cleanup (#1 + #8)
 
@@ -37,6 +34,22 @@ Re-triage found the original "simple ~3-5 line wrap" verdict was wrong: `BunHttp
 ### Skipped — #5 attempts.restart_count
 
 Not a follow-up. `restart_count` is hardcoded to `0` in `src/http/snapshot.ts` because v1 has no separate restart counter (only retry attempts). Tracking it for real would require a new field on `RunningEntry`, increment sites in the worker/retry paths, and a persistence story — that's §18.2-class work, not a leftover. The v1 answer is "always 0", which is shipped.
+
+### Deferred — non-trivial items still on the list
+
+Five items from the triage round were judged non-trivial and stayed deferred.
+The scope notes below are what the triage Explore pass turned up; preserved
+here so a future session has the same starting context.
+
+- **#2 — `before_remove` hook on reconcile-driven cleanup.** The `CleanupWorkspace` side-effect interpreter in `src/orchestrator/Orchestrator.ts` (around line 240–260) calls `WorkspaceManager.cleanWorkspaceFor` directly without running `runBeforeRemove` first. The hook's `Workspace` handle was owned by the worker scope, which is already torn down by the time the side effect fires from reconcile. Synthesizing a `Workspace` from `root + identifier` is technically possible (the hook reads `path` + `workspace_key`), but verifying the hook contract doesn't rely on scope-owned state is the real work. ~30 LOC across `Orchestrator.ts`, `WorkspaceManager.ts`, `Hooks.ts`.
+
+- **#3 — `recent_events[].event` field tagged with §10.4 kinds.** `src/http/Api.ts` (around line 138–143) builds the per-issue `recent_events` array by falling back from `record.last_event` to `record.msg`. The spec example shows kinds like `"notification"` (from §10.4's event taxonomy). Reaching that fidelity needs (a) an `event_kind` field on `LogRecord` (touches the Logger schema in `src/observability/Logger.ts`), (b) every orchestrator/worker log site that wants to participate tagging its emits, and (c) a translation from internal `RuntimeEvent._tag` → spec §10.4 kind name. Cross-cutting; ~40–60 LOC plus a design pass on the taxonomy mapping.
+
+- **#6 — `stubWorkflowLoader` test fixture dedup.** Four test files hand-roll a stubbed `WorkflowLoader` with `as never` casts: `test/unit/claude/McpServer.test.ts`, `test/unit/linear/LinearClient.test.ts`, `test/unit/workspace/Hooks.test.ts`, `test/unit/workspace/WorkspaceManager.test.ts`. Three take `TypedConfig`; one (Hooks) also takes a `sourcePath`. Pulling these into a shared `test/fixtures/stubWorkflowLoader.ts` is mechanical but multi-file and benefits from a small design decision on the variant signature (single overloaded helper vs. two factories). ~25–40 LOC per call site × 4.
+
+- **#9 — Replace the 50ms `waitForTurnEnd` poll with a per-turn `Deferred`.** `src/orchestrator/Worker.ts:522-542` polls `turnEndedRef` at 50ms granularity instead of awaiting a `Deferred`. The replacement isn't a one-liner: three signal points inside the `subprocess.incoming` consumer fiber (`TurnCompleted`, `TurnFailed`, `StartupFailed`) currently call `Ref.set(turnEndedRef, ...)`. A per-turn `Deferred` needs either closure capture per turn or a `Ref<Deferred>` reset between iterations, plus careful scoping so the consumer fiber doesn't reference a stale Deferred after the turn boundary moves on. ~15 LOC of code change but the Effect-scoping is the real cost.
+
+- **#10 — Stronger doc-rot detection in `scripts/audit-section-17.ts`.** Today the audit fails when a referenced test is renamed or deleted, but not when a test's *meaning* changes under the same name (e.g. an assertion is gutted but the `it("...")` string stays put). Detecting that requires either (a) per-bullet behavior-level invariants the audit re-runs (hand-written and per-bullet), or (b) a hash sentinel embedded in `test/section-17-coverage.md` over the matched test's source text — fragile to whitespace, easy to invalidate on refactor. Either path needs a design pass on what counts as a "meaningful" change.
 
 ## 2026-05-21T17:21Z — Test matrix verification (top-level group, 2 subtasks)
 
