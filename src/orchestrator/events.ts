@@ -1,7 +1,7 @@
 // OrchestratorEvent: the tagged union of every input that drives the orchestrator's
 // reducer. One variant per spec §7.3 transition trigger plus the few non-§7.3 events.
 import { Data } from "effect";
-import type { Issue, MinimalIssue } from "../linear/schemas.ts";
+import type { Issue } from "../linear/schemas.ts";
 import type { WorkflowDefinition } from "../config/WorkflowSchema.ts";
 import type { RuntimeEvent } from "../claude/EventMapping.ts";
 import type { RunningEntry } from "./State.ts";
@@ -68,24 +68,6 @@ export class RetryTimerFired extends Data.TaggedClass("RetryTimerFired")<{
 }> {}
 
 /**
- * Spec §7.3 / §8.5 `Reconciliation State Refresh` — the reconcile fiber has
- * fetched the latest tracker state for every running issue. The reducer
- * walks `refreshed`, deciding per-issue between `update snapshot`, `interrupt
- * + cleanup` (terminal), or `interrupt only` (neither active nor terminal).
- */
-export class ReconciliationStateRefresh extends Data.TaggedClass(
-  "ReconciliationStateRefresh",
-)<{
-  readonly refreshed: ReadonlyArray<MinimalIssue>;
-  /** §8.5 Part A: the reducer uses these to know which classification rule
-   *  to apply per refreshed issue. The lists are the current effective
-   *  config (active/terminal); the reducer compares state names
-   *  case-insensitively per spec §4.2 "Normalized Issue State". */
-  readonly active_states: ReadonlyArray<string>;
-  readonly terminal_states: ReadonlyArray<string>;
-}> {}
-
-/**
  * Spec §7.3 `Stall Timeout`. The reconcile fiber observed `elapsed_ms >
  * stall_timeout_ms` for one running issue and is asking the reducer to
  * schedule the kill + retry.
@@ -124,7 +106,6 @@ export type OrchestratorEvent =
   | WorkerEventReceived
   | WorkerExited
   | RetryTimerFired
-  | ReconciliationStateRefresh
   | StallDetected
   | WorkflowReloaded
   | ImmediateTickRequested;

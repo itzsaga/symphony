@@ -10,6 +10,7 @@ import {
   UpdateIssueSnapshot,
   type SideEffect,
 } from "./sideEffects.ts";
+import { computeFailureBackoffMs, DEFAULT_MAX_RETRY_BACKOFF_MS } from "./Retry.ts";
 import type { OrchestratorRuntimeState, RunningEntry } from "./State.ts";
 
 /* -------------------------------------------------------------------------- */
@@ -30,25 +31,6 @@ export interface ReconcileResult {
 }
 
 const EMPTY_RESULT: ReconcileResult = { events: [], sideEffects: [] };
-
-/* -------------------------------------------------------------------------- */
-/* Retry backoff math — mirrors State.ts so this module stays standalone.     */
-/*                                                                            */
-/* Kept in lockstep with the reducer's `computeFailureBackoffMs`. If those    */
-/* constants change, update both call sites (or expose the helper from        */
-/* State.ts and import it). Duplication is deliberate: Reconcile.ts is pure   */
-/* and has no Effect dependency, so we avoid pulling in the reducer module's  */
-/* Effect-heavy imports just to share one tiny helper.                        */
-/* -------------------------------------------------------------------------- */
-
-const FAILURE_RETRY_BASE_MS = 10_000;
-const MAX_RETRY_BACKOFF_MS = 300_000;
-
-const computeStallBackoffMs = (attempt: number): number => {
-  const exponent = Math.max(0, attempt - 1);
-  const raw = FAILURE_RETRY_BASE_MS * Math.pow(2, exponent);
-  return Math.min(raw, MAX_RETRY_BACKOFF_MS);
-};
 
 /* -------------------------------------------------------------------------- */
 /* Part A — Stall detection.                                                  */
@@ -88,7 +70,10 @@ export const reconcileStalled = (
     // semantics, so `retry_attempt + 1` (or 1 on the first stall).
     const priorRetryAttempt = entry.retry_attempt ?? 0;
     const nextAttempt = priorRetryAttempt + 1;
-    const delayMs = computeStallBackoffMs(nextAttempt);
+    const delayMs = computeFailureBackoffMs(
+      nextAttempt,
+      DEFAULT_MAX_RETRY_BACKOFF_MS,
+    );
 
     events.push(new StallDetected({ issue_id: issueId, at: now }));
     sideEffects.push(

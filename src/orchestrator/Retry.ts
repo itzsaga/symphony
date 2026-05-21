@@ -12,6 +12,16 @@ export const CONTINUATION_RETRY_DELAY_MS = 1_000;
 /** Base for the exponential-backoff retry formula (§8.4). */
 export const FAILURE_RETRY_BASE_MS = 10_000;
 
+/**
+ * Default cap on the exponential-backoff result. Spec §5.3.5 names
+ * `agent.max_retry_backoff_ms` with a default of 5 minutes; the reducer
+ * (`State.onWorkerExited`) and the reconciler (`Reconcile.reconcileStalled`)
+ * both honor this default while the orchestrator's runtime `handleRetryFire`
+ * reads the live `config.agent_runner.max_retry_backoff_ms` instead. The two
+ * paths converge whenever the config carries the default value.
+ */
+export const DEFAULT_MAX_RETRY_BACKOFF_MS = 300_000;
+
 /* -------------------------------------------------------------------------- */
 /* Backoff math.                                                              */
 /* -------------------------------------------------------------------------- */

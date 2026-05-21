@@ -161,8 +161,9 @@ const readPerStateCaps = (
 /**
  * Count issues in `state.running` whose state matches the given lowercase
  * state name. The runtime keeps the in-memory `issue.state` field in sync
- * via reconciliation (see `ReconciliationStateRefresh` handling in
- * `State.ts`), so this count tracks the operator-visible state per §8.3.
+ * via reconciliation (see `reconcileTrackerStates` in `Reconcile.ts` and
+ * the `UpdateIssueSnapshot` side-effect interpreter in `Orchestrator.ts`),
+ * so this count tracks the operator-visible state per §8.3.
  */
 const runningCountByState = (
   state: OrchestratorRuntimeState,

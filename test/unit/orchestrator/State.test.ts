@@ -6,7 +6,7 @@ import {
   TopLevelSchema,
   type TypedConfig,
 } from "../../../src/config/WorkflowSchema.ts";
-import type { Issue, MinimalIssue } from "../../../src/linear/schemas.ts";
+import type { Issue } from "../../../src/linear/schemas.ts";
 import { TurnCompleted, UsageReport, RateLimit, TextDelta } from "../../../src/claude/EventMapping.ts";
 import type { RateLimitInfo, Usage } from "../../../src/claude/StreamJson.ts";
 import {
@@ -22,7 +22,6 @@ import {
 import {
   ImmediateTickRequested,
   PollTick,
-  ReconciliationStateRefresh,
   RetryTimerFired,
   StallDetected,
   WorkerEventReceived,
@@ -33,7 +32,6 @@ import {
 } from "../../../src/orchestrator/events.ts";
 import type {
   CancelRetry,
-  CleanupWorkspace,
   EmitMetric,
   InterruptWorker,
   Log,
@@ -541,135 +539,6 @@ describe("RetryTimerFired", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* ReconciliationStateRefresh.                                                */
-/* -------------------------------------------------------------------------- */
-
-describe("ReconciliationStateRefresh", () => {
-  it("interrupts + cleans up for terminal-state issues", () => {
-    const cfg = makeConfig();
-    const issue = makeIssue();
-    const entry = makeRunningEntry({});
-    const state: OrchestratorRuntimeState = {
-      ...initialState(cfg),
-      running: new Map([[issue.id, entry]]),
-      claimed: new Set([issue.id]),
-    };
-    const refreshed: ReadonlyArray<MinimalIssue> = [
-      { id: issue.id, identifier: issue.identifier, state: "Done" },
-    ];
-    const result = reduce(
-      state,
-      new ReconciliationStateRefresh({
-        refreshed,
-        active_states: cfg.tracker.active_states,
-        terminal_states: cfg.tracker.terminal_states,
-      }),
-    );
-    expect(result.state.running.has(issue.id)).toBe(false);
-    expect(result.state.claimed.has(issue.id)).toBe(false);
-    const interrupt = findSideEffect(result.sideEffects, "InterruptWorker");
-    expect(interrupt).toBeDefined();
-    expect((interrupt as InterruptWorker).reason).toBe("terminal");
-    const cleanup = findSideEffect(result.sideEffects, "CleanupWorkspace");
-    expect(cleanup).toBeDefined();
-    expect((cleanup as CleanupWorkspace).identifier).toBe(issue.identifier);
-  });
-
-  it("updates the in-memory issue snapshot when still active", () => {
-    const cfg = makeConfig();
-    const issue = makeIssue({ state: "Todo" });
-    const entry = makeRunningEntry({}, { state: "Todo" });
-    const state: OrchestratorRuntimeState = {
-      ...initialState(cfg),
-      running: new Map([[issue.id, entry]]),
-      claimed: new Set([issue.id]),
-    };
-    const refreshed: ReadonlyArray<MinimalIssue> = [
-      { id: issue.id, identifier: issue.identifier, state: "In Progress" },
-    ];
-    const result = reduce(
-      state,
-      new ReconciliationStateRefresh({
-        refreshed,
-        active_states: cfg.tracker.active_states,
-        terminal_states: cfg.tracker.terminal_states,
-      }),
-    );
-    expect(result.state.running.has(issue.id)).toBe(true);
-    expect(result.state.running.get(issue.id)?.issue.state).toBe(
-      "In Progress",
-    );
-    // No interrupt or cleanup for active updates.
-    expect(findSideEffect(result.sideEffects, "InterruptWorker")).toBeUndefined();
-    expect(findSideEffect(result.sideEffects, "CleanupWorkspace")).toBeUndefined();
-  });
-
-  it("interrupts without cleanup when state is neither active nor terminal", () => {
-    const cfg = makeConfig();
-    const issue = makeIssue();
-    const entry = makeRunningEntry({});
-    const state: OrchestratorRuntimeState = {
-      ...initialState(cfg),
-      running: new Map([[issue.id, entry]]),
-      claimed: new Set([issue.id]),
-    };
-    const refreshed: ReadonlyArray<MinimalIssue> = [
-      { id: issue.id, identifier: issue.identifier, state: "Backlog" },
-    ];
-    const result = reduce(
-      state,
-      new ReconciliationStateRefresh({
-        refreshed,
-        active_states: cfg.tracker.active_states,
-        terminal_states: cfg.tracker.terminal_states,
-      }),
-    );
-    expect(result.state.running.has(issue.id)).toBe(false);
-    expect(findSideEffect(result.sideEffects, "InterruptWorker")).toBeDefined();
-    expect(findSideEffect(result.sideEffects, "CleanupWorkspace")).toBeUndefined();
-  });
-
-  it("ignores refreshed entries for non-running issues", () => {
-    const cfg = makeConfig();
-    const state = initialState(cfg);
-    const result = reduce(
-      state,
-      new ReconciliationStateRefresh({
-        refreshed: [{ id: "ghost", identifier: "GH-1", state: "Done" }],
-        active_states: cfg.tracker.active_states,
-        terminal_states: cfg.tracker.terminal_states,
-      }),
-    );
-    expect(result.state).toEqual(state);
-    expect(result.sideEffects).toEqual([]);
-  });
-
-  it("matches state names case-insensitively", () => {
-    const cfg = makeConfig();
-    const issue = makeIssue();
-    const entry = makeRunningEntry({});
-    const state: OrchestratorRuntimeState = {
-      ...initialState(cfg),
-      running: new Map([[issue.id, entry]]),
-      claimed: new Set([issue.id]),
-    };
-    const refreshed: ReadonlyArray<MinimalIssue> = [
-      { id: issue.id, identifier: issue.identifier, state: "DONE" },
-    ];
-    const result = reduce(
-      state,
-      new ReconciliationStateRefresh({
-        refreshed,
-        active_states: cfg.tracker.active_states,
-        terminal_states: cfg.tracker.terminal_states,
-      }),
-    );
-    expect(result.state.running.has(issue.id)).toBe(false);
-    expect(findSideEffect(result.sideEffects, "CleanupWorkspace")).toBeDefined();
-  });
-});
-
-/* -------------------------------------------------------------------------- */
 /* StallDetected.                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -768,11 +637,6 @@ describe("reducer exhaustiveness", () => {
         at: new Date(),
       }),
       new RetryTimerFired({ issue_id: "issue-1", attempt: 1 }),
-      new ReconciliationStateRefresh({
-        refreshed: [],
-        active_states: cfg.tracker.active_states,
-        terminal_states: cfg.tracker.terminal_states,
-      }),
       new StallDetected({ issue_id: "issue-1", at: new Date() }),
       new WorkflowReloaded({
         definition: {

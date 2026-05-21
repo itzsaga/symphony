@@ -5,27 +5,30 @@ import type { Issue, MinimalIssue } from "../linear/schemas.ts";
 import type { TypedConfig } from "../config/WorkflowSchema.ts";
 import type { RateLimitInfo } from "../claude/StreamJson.ts";
 import type { RuntimeEvent } from "../claude/EventMapping.ts";
-import {
-  ReconciliationStateRefresh,
-  type ImmediateTickRequested,
-  type OrchestratorEvent,
-  type PollTick,
-  type RetryTimerFired,
-  type StallDetected,
-  type WorkerEventReceived,
-  type WorkerExited,
-  type WorkerStarted,
-  type WorkflowReloaded,
+import type {
+  ImmediateTickRequested,
+  OrchestratorEvent,
+  PollTick,
+  RetryTimerFired,
+  StallDetected,
+  WorkerEventReceived,
+  WorkerExited,
+  WorkerStarted,
+  WorkflowReloaded,
 } from "./events.ts";
 import {
   CancelRetry,
-  CleanupWorkspace,
   EmitMetric,
   InterruptWorker,
   Log,
   ScheduleRetry,
   type SideEffect,
 } from "./sideEffects.ts";
+import {
+  CONTINUATION_RETRY_DELAY_MS,
+  DEFAULT_MAX_RETRY_BACKOFF_MS,
+  computeFailureBackoffMs,
+} from "./Retry.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Domain types — spec §4.1.5 / §4.1.6 / §4.1.7 / §4.1.8.                     */
@@ -159,26 +162,15 @@ export interface ReduceResult {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Constants from spec §8.4.                                                  */
+/* Retry constants (§8.4) — re-exported from Retry.ts.                        */
+/*                                                                            */
+/* Re-exports keep the existing import surface (`State.ts` was the historical */
+/* home for these) while the canonical definitions live in `Retry.ts`, which */
+/* is the module both the reducer (`onWorkerExited`) and the reconciler      */
+/* (`reconcileStalled`) now share.                                           */
 /* -------------------------------------------------------------------------- */
 
-/** Continuation retry delay after a clean worker exit (§8.4). */
-export const CONTINUATION_RETRY_DELAY_MS = 1_000;
-/** Base for the exponential-backoff retry formula (§8.4). */
-const FAILURE_RETRY_BASE_MS = 10_000;
-/**
- * Cap on the backoff power. Spec §5.3.5 names `agent.max_retry_backoff_ms`
- * with a default of 5 minutes; until the TypedConfig schema grows an
- * `agent.*` block, the reducer honors the spec default and the runtime can
- * override later by clipping the result.
- */
-export const DEFAULT_MAX_RETRY_BACKOFF_MS = 300_000;
-
-const computeFailureBackoffMs = (attempt: number): number => {
-  const exponent = Math.max(0, attempt - 1);
-  const raw = FAILURE_RETRY_BASE_MS * Math.pow(2, exponent);
-  return Math.min(raw, DEFAULT_MAX_RETRY_BACKOFF_MS);
-};
+export { CONTINUATION_RETRY_DELAY_MS, DEFAULT_MAX_RETRY_BACKOFF_MS };
 
 /* -------------------------------------------------------------------------- */
 /* Small helpers for immutable Map/Set updates.                                */
@@ -473,7 +465,7 @@ const onWorkerExited = (
   const delayMs =
     event.reason === "normal"
       ? CONTINUATION_RETRY_DELAY_MS
-      : computeFailureBackoffMs(nextAttempt);
+      : computeFailureBackoffMs(nextAttempt, DEFAULT_MAX_RETRY_BACKOFF_MS);
   const due_at_ms = event.at.getTime() + delayMs;
   const retryEntry: RetryEntry = {
     issue_id: event.issue_id,
@@ -557,90 +549,6 @@ const onRetryTimerFired = (
           }),
         ]
       : [],
-  };
-};
-
-const isTerminal = (
-  state: string,
-  terminal_states: ReadonlyArray<string>,
-): boolean => {
-  const lower = state.toLowerCase();
-  return terminal_states.some((s) => s.toLowerCase() === lower);
-};
-
-const isActive = (
-  state: string,
-  active_states: ReadonlyArray<string>,
-): boolean => {
-  const lower = state.toLowerCase();
-  return active_states.some((s) => s.toLowerCase() === lower);
-};
-
-const onReconciliationStateRefresh = (
-  state: OrchestratorRuntimeState,
-  event: ReconciliationStateRefresh,
-): ReduceResult => {
-  let running = state.running;
-  let claimed = state.claimed;
-  const sideEffects: Array<SideEffect> = [];
-
-  for (const refreshed of event.refreshed) {
-    const entry = running.get(refreshed.id);
-    if (entry === undefined) continue;
-    if (isTerminal(refreshed.state, event.terminal_states)) {
-      // §8.5: "If tracker state is terminal: terminate worker and clean
-      // workspace."
-      running = mapDelete(running, refreshed.id);
-      claimed = setDelete(claimed, refreshed.id);
-      sideEffects.push(
-        new InterruptWorker({ issue_id: refreshed.id, reason: "terminal" }),
-        new CleanupWorkspace({
-          issue_id: refreshed.id,
-          identifier: entry.issue.identifier,
-        }),
-        new Log({
-          level: "info",
-          message: "reconcile: terminal state, interrupting worker",
-          fields: {
-            issue_id: refreshed.id,
-            identifier: entry.issue.identifier,
-            new_state: refreshed.state,
-          },
-        }),
-      );
-      continue;
-    }
-    if (isActive(refreshed.state, event.active_states)) {
-      // §8.5: "If tracker state is still active: update the in-memory issue
-      // snapshot."
-      const updated: RunningEntry = {
-        ...entry,
-        issue: { ...entry.issue, state: refreshed.state },
-      };
-      running = mapSet(running, refreshed.id, updated);
-      continue;
-    }
-    // §8.5: "If tracker state is neither active nor terminal: terminate
-    // worker without workspace cleanup."
-    running = mapDelete(running, refreshed.id);
-    claimed = setDelete(claimed, refreshed.id);
-    sideEffects.push(
-      new InterruptWorker({ issue_id: refreshed.id, reason: "non_active" }),
-      new Log({
-        level: "info",
-        message: "reconcile: non-active state, interrupting worker",
-        fields: {
-          issue_id: refreshed.id,
-          identifier: entry.issue.identifier,
-          new_state: refreshed.state,
-        },
-      }),
-    );
-  }
-
-  return {
-    state: { ...state, running, claimed },
-    sideEffects,
   };
 };
 
@@ -729,7 +637,6 @@ export const reduce = (
       WorkerEventReceived: (e) => onWorkerEventReceived(state, e),
       WorkerExited: (e) => onWorkerExited(state, e),
       RetryTimerFired: (e) => onRetryTimerFired(state, e),
-      ReconciliationStateRefresh: (e) => onReconciliationStateRefresh(state, e),
       StallDetected: (e) => onStallDetected(state, e),
       WorkflowReloaded: (e) => onWorkflowReloaded(state, e),
       ImmediateTickRequested: (e) => onImmediateTickRequested(state, e),
@@ -775,4 +682,3 @@ export const newRunningEntry = (params: {
  * subtasks: callers can `import { ... } from "./State.ts"` for the entire
  * orchestrator-state surface area. */
 export type { MinimalIssue };
-export { ReconciliationStateRefresh };
