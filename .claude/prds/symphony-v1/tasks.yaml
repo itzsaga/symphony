@@ -79,7 +79,7 @@
       spec: specs/claude-event-mapping.md
 - name: In-process MCP server and linear_graphql tool
   description: Host an SDK-type MCP server inside the orchestrator that exposes the linear_graphql tool (§10.5). Implements MCP JSON-RPC methods (initialize, tools/list, tools/call, notifications/initialized) routed through Claude's control-protocol mcp_message channel. The tool executes GraphQL via LinearClient and returns the response per §10.5's tool-result semantics.
-  status: defined
+  status: completed
   spec: specs/mcp-server-and-linear-graphql.md
   subtasks: []
 - name: Orchestrator

@@ -2,6 +2,26 @@
 
 Reverse-chronological. Newest entries at the top.
 
+## 2026-05-21T00:55Z — In-process MCP server and linear_graphql tool (top-level, 1 leaf)
+
+**Status**: Completed. Suite total: 242 pass / 0 fail across 19 files (+21 tests, +1 file).
+
+### Changes
+- `src/claude/mcpSchemas.ts` — Effect Schemas for MCP JSON-RPC wire frames: `JsonRpcRequest`, `ToolsCallParams`, standard `JsonRpcErrorCode` enum (`ParseError`/`InvalidRequest`/`MethodNotFound`/`InvalidParams`/`InternalError`), plus exported types for the outbound envelopes (`JsonRpcSuccessResponse`, `JsonRpcErrorResponse`, `ToolCallResult`, `InitializeResult`, `ToolDescriptor`). Open index-signature `{ key: Schema.String, value: Schema.Unknown }` for excess-key tolerance, matching `StreamJson.ts`'s style.
+- `src/claude/linearGraphqlTool.ts` — `linear_graphql` tool: input narrowing (object form + raw-string shorthand per §10.5), `countOperations` hand-rolled GraphQL scanner (strings/comments stripped, keyword + brace-depth state machine, anonymous `{ … }` shorthand counted as one operation), auth precondition via `WorkflowLoader.current`, execution via `LinearClient.executeRaw`, result mapping (success → `success: true`; GraphQL `errors` array → `isError: false, success: false` with full body preserved; host failure → `isError: true` with code).
+- `src/claude/McpServer.ts` — `McpServer` `Context.Tag` + `McpServerLive` Layer + JSON-RPC dispatcher routing `initialize`, `tools/list`, `tools/call`, `notifications/initialized`. Advertises `protocolVersion: "2025-06-18"`, `serverInfo: { name: "symphony", version: <package.json> }`, `capabilities: { tools: {} }`. Unknown methods → `MethodNotFound` JSON-RPC error; unknown tool names inside `tools/call` → tool-level `isError: true` (§10.5 "continue the session"). Re-exports `LINEAR_GRAPHQL_TOOL_NAME` / `linearGraphqlToolDescriptor` so the orchestrator wiring can import a single canonical name.
+- `test/unit/claude/McpServer.test.ts` — 21 tests: handshake, `tools/list` exposes only `linear_graphql`, valid invocation, GraphQL-errors path preserves body, empty-query (`missing_query`), multi-operation rejection, raw-string shorthand, unknown-tool tool-error (not transport error), API-key redaction across all five JSON-RPC paths, plus 7 `countOperations` unit tests (string-literal evasion, field-name evasion, anonymous shorthand).
+
+### Decisions
+- **`countOperations` scanner** chosen over `graphql-js` (~150KB for one method). Hand-rolled scanner strips strings/comments, then state-machines on keyword + brace depth. Trade-off documented in the file header.
+- **Auth precondition lives in the tool, not LinearClient.** `LinearClient.executeRaw` would also fail with `LinearRequestFail` on missing auth, but mapping to `missing_auth` at the tool layer gives the model a stable error contract.
+- **API-key redaction is structural**, not regex-filtered: the key never enters any log payload (verified by the redaction test scanning every captured line for the secret literal).
+- **`MCP_PROTOCOL_VERSION` pinned** as a constant for future bumps.
+
+### Latent observations (not fixed, out of scope)
+- `stubWorkflowLoader` helpers are hand-rolled `as never` casts in `LinearClient.test.ts`, `Hooks.test.ts`, `WorkspaceManager.test.ts`, and now `McpServer.test.ts`. A shared `test/fixtures/stubWorkflowLoader.ts` would dedupe — separate task.
+- `mcpSchemas.ts` exports several types-only schemas (outbound envelopes) not currently decoded at runtime; kept for parity with the wire-shape-per-schema pattern established in `StreamJson.ts`.
+
 ## 2026-05-14T00:48Z — Claude Code stream-json runner (top-level group, 4 subtasks)
 
 **Status**: Completed (all 4 subtasks). Suite total: 221 pass / 0 fail across 18 files.
