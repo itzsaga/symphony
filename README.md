@@ -21,6 +21,85 @@ process, in-memory orchestrator state, no built binary, no publish step.
   inactive interrupt without cleanup.
 - Optional HTTP dashboard + JSON API (§13.7) for observing live state.
 
+## How it works
+
+Symphony is a single long-running Bun process driving an Effect service
+graph. Every `polling.interval_ms` (default 30s) it runs one tick:
+
+1. **Reconcile running workers.** Refetch tracker state for every
+   in-flight issue. Terminal → interrupt + remove workspace.
+   Non-active-non-terminal → interrupt and leave the workspace.
+   Stalled past `agent_runner.stall_timeout_ms` → interrupt + queue a
+   retry. (`src/orchestrator/Reconcile.ts`)
+2. **Fetch candidates.** Linear GraphQL query for issues in
+   `tracker.active_states`, scoped to `tracker.project_slug`.
+   (`src/linear/queries.ts`)
+3. **Select a batch.** Sort by priority → created_at → identifier; drop
+   anything already running/claimed, anything blocked (the `Todo` blocker
+   rule, §8.2), or anything over a global/per-state concurrency cap.
+   (`src/orchestrator/Dispatch.ts`)
+4. **Dispatch.** For each selected issue: ensure the per-issue workspace
+   directory exists under `workspace.root` (`after_create` hook fires
+   on first creation), run `before_run`, then spawn
+   `nono run … -- claude --input-format stream-json --output-format
+   stream-json` and feed the rendered prompt in over stdin.
+5. **Stream and react.** Decode `stream-json` frames into spec §10.4
+   events, update orchestrator state (turns, tokens, rate-limit reset),
+   and feed continuation prompts between turns until the issue moves out
+   of `active_states`, hits a terminal state, errors, or stalls.
+
+The orchestrator owns no persistent state — restart and Symphony rebuilds
+its picture of the world from Linear plus on-disk workspaces.
+
+## Where you (the human) plug in
+
+There is no prompt-time approval surface inside a run. Your control
+points are all *outside* the agent loop:
+
+- **Linear is the control plane.** Creating, prioritizing, and moving
+  issues drives everything. Moving an issue *into* an active state
+  queues it for the next tick; moving it *out* (to any non-active,
+  non-terminal state) interrupts the worker cleanly and **keeps the
+  workspace**; moving it to a terminal state interrupts + removes the
+  workspace. Issue body and comments are part of the prompt context, so
+  comments are how you "talk to" an in-flight agent across turn
+  boundaries.
+- **The `Human Review` handoff pattern.** Define a non-terminal state
+  outside `active_states` (e.g. `Human Review`, `Needs Input`,
+  `Blocked`). Instruct the agent in `WORKFLOW.md` to transition the
+  issue there when it wants you. Symphony's reconciler will interrupt
+  the worker without cleanup so you can inspect the workspace, then
+  pick the run back up the moment you move the issue back into an
+  active state. This is the spec-blessed escape hatch (§3) and the
+  intended way to do HITL.
+- **`WORKFLOW.md` is your config + prompt.** The front matter sets
+  polling cadence, concurrency caps, retry/backoff, active/terminal
+  state names, sandbox profile, hooks, and continuation-prompt
+  template. The body is the per-issue prompt, rendered through strict
+  Liquid. Edits land live on the next tick — no restart — for
+  everything except `--port`.
+- **Workspace hooks** (`hooks.after_create`, `before_run`, `after_run`,
+  `before_remove`). The standard place to `git clone`, install deps,
+  run formatters, drop status comments back into Linear, etc. Hooks
+  are trusted code (§15.4) and run inside the sandbox under the `hook`
+  policy. `after_create` / `before_run` failures abort; `after_run` /
+  `before_remove` failures are logged and ignored.
+- **`tracker.active_states` / `terminal_states`.** The bouncer at the
+  door. Anything in `active_states` is fair game; the agent is
+  expected to move issues out of it when work is done. Defaults are
+  `["Todo", "In Progress"]` active and
+  `["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]` terminal.
+- **No in-CLI approvals.** Claude runs `--permission-mode
+  bypassPermissions --permission-prompt-tool stdio`; if a
+  `can_use_tool` request ever fires (it shouldn't) Symphony returns
+  `{behavior:"deny", interrupt:true}` and the run fails into the
+  exponential-backoff retry path. The sandbox (`nono`) is the safety
+  boundary, not prompt approvals — see [`TRUST.md`](TRUST.md) §1, §3.
+- **Observability surfaces.** Structured JSONL on stderr is always on;
+  the optional HTTP server (`--port <N>` or `server.port` in front
+  matter) serves a live dashboard at `/` and a JSON API for poking at
+  orchestrator state from scripts.
+
 ## Quickstart
 
 ```sh
